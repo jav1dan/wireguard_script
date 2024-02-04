@@ -38,25 +38,45 @@ ListenPort = 51820" > /etc/wireguard/wg0.conf
 # Генерация ключей и конфигурации для клиента
 function add_client() {
     client_name=$1
+    server_public_key=$(cat /etc/wireguard/publickey)
+
+    # Генерация ключей для клиента
     wg genkey | tee /etc/wireguard/${client_name}_privatekey | wg pubkey > /etc/wireguard/${client_name}_publickey
 
     client_private_key=$(cat /etc/wireguard/${client_name}_privatekey)
     client_public_key=$(cat /etc/wireguard/${client_name}_publickey)
-    server_public_key=$(cat /etc/wireguard/publickey)
+
+    # Предполагаем, что каждый новый клиент получает уникальный адрес в подсети
+    # Последний октет IP-адреса клиента увеличивается на 1 для каждого нового клиента
+    # Например: 10.0.0.2, 10.0.0.3 и т.д.
+    client_ip="10.0.0.$((2 + $(ls /etc/wireguard/*_privatekey | wc -l)))"
 
     echo "Создание конфигурации для клиента $client_name..."
     echo "[Interface]
 PrivateKey = $client_private_key
-Address = 10.0.0.2/24
+Address = $client_ip/24
+DNS = 8.8.8.8
 
 [Peer]
 PublicKey = $server_public_key
-Endpoint = {SERVER_ADDRESS}:51820
+Endpoint = ${server_address}:51820
 AllowedIPs = 0.0.0.0/0
-PersistentKeepalive = 25" > /etc/wireguard/${client_name}.conf
+PersistentKeepalive = 25" > /etc/wireguard/clients/${client_name}.conf
 
-    echo "Конфигурация для клиента $client_name создана."
+    echo "Конфигурация для клиента $client_name создана и сохранена в /etc/wireguard/clients/${client_name}.conf."
+
+    # Добавление клиентского публичного ключа в конфиг сервера
+    echo -e "\n[Peer]\nPublicKey = $client_public_key\nAllowedIPs = $client_ip/32" >> /etc/wireguard/wg0.conf
+
+    # Перезапуск WireGuard для применения изменений
+    wg-quick down wg0
+    wg-quick up wg0
+
+    echo "Клиент $client_name успешно добавлен и настроен."
 }
+
+# Создание директории для клиентских конфигов, если она еще не создана
+mkdir -p /etc/wireguard/clients
 
 # Проверка наличия аргументов командной строки
 if [[ $# -eq 0 ]]; then
